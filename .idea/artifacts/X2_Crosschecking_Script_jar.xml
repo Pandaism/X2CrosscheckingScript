@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="X2 Crosschecking Script:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/X2_Crosschecking_Script_jar</output-path>
+    <root id="archive" name="X2 Crosschecking Script.jar">
+      <element id="module-output" name="X2 Crosschecking Script" />
+    </root>
+  </artifact>
+</component>
