@@ -57,9 +57,15 @@ public class X2CrossChecker {
                     File bwcRoot = null;
 
                     for(File root : deleteRoots) {
-                        String systemDisplayName = FileSystemView.getFileSystemView().getSystemDisplayName(root);
-                        if(systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")).equals("FOCUS-X1")) {
-                            bwcRoot = root;
+                        FileSystemView fileSystemView = FileSystemView.getFileSystemView();
+                        if(fileSystemView != null) {
+                            String systemDisplayName = fileSystemView.getSystemDisplayName(root);
+
+                            if(systemDisplayName.length() > 0) {
+                                if(systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")).equals("FOCUS-X1")) {
+                                    bwcRoot = root;
+                                }
+                            }
                         }
                     }
 
@@ -87,8 +93,13 @@ public class X2CrossChecker {
                     Map<Character, String> disconnectMap = new HashMap<>();
 
                     for(File root : idleRoots) {
-                        String systemDisplayName = FileSystemView.getFileSystemView().getSystemDisplayName(root);
-                        disconnectMap.put(root.getAbsolutePath().charAt(0), systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")));
+                        FileSystemView fileSystemView = FileSystemView.getFileSystemView();
+                        if(fileSystemView != null) {
+                            String systemDisplayName = fileSystemView.getSystemDisplayName(root);
+                            if(systemDisplayName.length() > 0) {
+                                disconnectMap.put(root.getAbsolutePath().charAt(0), systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")));
+                            }
+                        }
                     }
 
                     if(!disconnectMap.containsValue("FOCUS-X1")) {
@@ -97,7 +108,7 @@ public class X2CrossChecker {
                     }
                     break;
             }
-            Thread.sleep(1000);
+            Thread.sleep(125);
         }
     }
 
