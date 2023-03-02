@@ -3,21 +3,49 @@ package net.safefleet.pandaism;
 import javax.swing.*;
 import javax.swing.filechooser.FileSystemView;
 import java.awt.*;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 
 public class X2CrossChecker {
-    private enum STATES {
-        WAITING_FOR_DRIVE, POST_DETECTION, DELETE_DRIVE, IDLE
+    public enum STATES {
+        WAITING_FOR_DRIVE, POST_DETECTION, DELETE_DRIVE, IDLE, UPDATE_MCU, UPDATE_FIRMWARE, CERTIFY
     }
 
     private static boolean running = false;
+    public static STATES currentState = STATES.WAITING_FOR_DRIVE;
+    public static boolean wipeBypass = false;
+    public static boolean wiped = false;
+
+    private static File getBWCRootDirectory() {
+        File[] deleteRoots = File.listRoots();
+
+        for(File root : deleteRoots) {
+            FileSystemView fileSystemView = FileSystemView.getFileSystemView();
+            if (fileSystemView != null) {
+                String systemDisplayName = fileSystemView.getSystemDisplayName(root);
+
+                if (systemDisplayName != null) {
+                    if (systemDisplayName.length() > 0) {
+                        if (systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")).equals("FOCUS-X1")) {
+                            return root;
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
 
     public static void main(String[] args) throws InterruptedException {
         Map<Character, String> driveMap = new HashMap<>();
-        STATES currentState = STATES.WAITING_FOR_DRIVE;
+        File bwcRoot = null;
+        String serialNumber = "";
+        String firmwareVersion = "";
+        String mcuVersion = "";
+        JFrame frame = new JFrame("BWC Detected");
 
         int startResult = JOptionPane.showConfirmDialog(null, "Do you want to start BWC background checker?", "BWC Background Detective", JOptionPane.YES_NO_OPTION);
 
@@ -28,6 +56,9 @@ public class X2CrossChecker {
         while(running) {
             switch (currentState) {
                 case WAITING_FOR_DRIVE:
+                    wipeBypass = false;
+                    wiped = false;
+
                     File[] wfdRoots = File.listRoots();
                     for (File root : wfdRoots) {
                         char driveLetter = root.getAbsolutePath().charAt(0);
@@ -41,32 +72,136 @@ public class X2CrossChecker {
                     break;
                 case POST_DETECTION:
                     if(driveMap.containsValue("FOCUS-X1")) {
-                        int result = JOptionPane.showConfirmDialog(null, "BWC mounting detect, please make sure this unit is completely wipe before packing and shipping. To wipe with this interface, please click Yes", "Detected BWC", JOptionPane.YES_NO_OPTION);
+                        bwcRoot = getBWCRootDirectory();
 
-                        if(result == JOptionPane.YES_OPTION) {
-                            currentState = STATES.DELETE_DRIVE;
-                        } else {
-                            currentState = STATES.IDLE;
+                        if(bwcRoot != null) {
+                            File serialNumberFile = new File(bwcRoot.getAbsolutePath() + "/USBSEL.lct");
+                            File versionFile = new File(bwcRoot.getAbsolutePath() + "/version.json");
+                            try {
+                                if(serialNumberFile.exists()) {
+                                    BufferedReader reader = new BufferedReader(new FileReader(serialNumberFile));
+                                    String line;
+                                    while((line = reader.readLine()) != null) {
+                                        serialNumber = line;
+                                    }
+                                    reader.close();
+                                }
+
+                                if(versionFile.exists()) {
+                                    BufferedReader reader = new BufferedReader(new FileReader(versionFile));
+                                    String line;
+                                    while((line = reader.readLine()) != null) {
+                                        if(line.contains("BWC Firmware")) {
+                                            firmwareVersion = line.substring(line.lastIndexOf(" ") + 1, line.length() - 2);
+                                        }
+
+                                        if(line.contains("MCU Firmware")) {
+                                            mcuVersion = line.substring(line.lastIndexOf("\t") + 2, line.length() - 2);
+                                        }
+                                    }
+                                    reader.close();
+                                }
+
+                                frame.setContentPane(new Window(serialNumber, firmwareVersion, mcuVersion).getBasePanel());
+                                frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+                                frame.pack();
+                                frame.setVisible(true);
+
+                                JOptionPane.showMessageDialog(null, "Be sure to wipe the camera before packing.");
+                                currentState = STATES.IDLE;
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+
                         }
                     } else {
                         currentState = STATES.WAITING_FOR_DRIVE;
                     }
                     break;
-                case DELETE_DRIVE:
-                    File[] deleteRoots = File.listRoots();
-                    File bwcRoot = null;
+                case UPDATE_MCU:
+                    try {
+                        File[] mcuFile = new File("./X2Crosschecking/mcu/").listFiles();
 
-                    for(File root : deleteRoots) {
-                        FileSystemView fileSystemView = FileSystemView.getFileSystemView();
-                        if(fileSystemView != null) {
-                            String systemDisplayName = fileSystemView.getSystemDisplayName(root);
+                        if(mcuFile != null) {
+                            if(bwcRoot != null) {
+                                File hex = new File(bwcRoot.getAbsolutePath() + "MCU.hex");
+                                if(!hex.exists()) {
+                                    Files.copy(mcuFile[0].toPath(), hex.toPath());
+                                    JOptionPane.showMessageDialog(null, "Please eject the BWC from dock to start MCU Update Process");
+                                    currentState = STATES.IDLE;
 
-                            if(systemDisplayName.length() > 0) {
-                                if(systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")).equals("FOCUS-X1")) {
-                                    bwcRoot = root;
+                                    Desktop desktop = Desktop.getDesktop();
+                                    try {
+                                        desktop.open(bwcRoot);
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+
                                 }
                             }
                         }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+                case UPDATE_FIRMWARE:
+                    try {
+                        File[] firmwareFiles = new File("./X2Crosschecking/firmware/").listFiles();
+
+                        if(firmwareFiles != null) {
+                            if(bwcRoot != null) {
+                                deleteFiles(bwcRoot);
+
+                                for(File file : firmwareFiles) {
+                                    Files.copy(file.toPath(), new File(bwcRoot.getAbsolutePath() + "/" + file.getName()).toPath());
+                                }
+
+                                Desktop desktop = Desktop.getDesktop();
+                                try {
+                                    desktop.open(bwcRoot);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+
+                                JOptionPane.showMessageDialog(null, "Please eject the BWC from dock to start Firmware Update Process");
+                                currentState = STATES.IDLE;
+
+                            }
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+                case CERTIFY:
+                    try {
+                        File[] certificateFiles = new File("./X2Crosschecking/certificate/").listFiles();
+                        if(certificateFiles != null) {
+                            if(bwcRoot != null) {
+                                deleteFiles(bwcRoot);
+
+                                for(File file : certificateFiles) {
+                                    Files.copy(file.toPath(), new File(bwcRoot.getAbsolutePath() + "/" + file.getName()).toPath());
+
+                                }
+
+                                Desktop desktop = Desktop.getDesktop();
+                                try {
+                                    desktop.open(bwcRoot);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+
+                                JOptionPane.showMessageDialog(null, "Please eject the BWC from dock and start certification process");
+                                currentState = STATES.IDLE;
+                            }
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+                case DELETE_DRIVE:
+                    if(bwcRoot == null) {
+                        bwcRoot = getBWCRootDirectory();
                     }
 
                     if(bwcRoot != null) {
@@ -96,8 +231,10 @@ public class X2CrossChecker {
                         FileSystemView fileSystemView = FileSystemView.getFileSystemView();
                         if(fileSystemView != null) {
                             String systemDisplayName = fileSystemView.getSystemDisplayName(root);
-                            if(systemDisplayName.length() > 0) {
-                                disconnectMap.put(root.getAbsolutePath().charAt(0), systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")));
+                            if(systemDisplayName != null) {
+                                if(systemDisplayName.length() > 0) {
+                                    disconnectMap.put(root.getAbsolutePath().charAt(0), systemDisplayName.substring(0, systemDisplayName.lastIndexOf(" ")));
+                                }
                             }
                         }
                     }
@@ -105,6 +242,17 @@ public class X2CrossChecker {
                     if(!disconnectMap.containsValue("FOCUS-X1")) {
                         currentState = STATES.WAITING_FOR_DRIVE;
                         driveMap = new HashMap<>();
+                        bwcRoot = null;
+                        serialNumber = "";
+                        firmwareVersion = "";
+                        mcuVersion = "";
+                        frame.dispose();
+
+                        if(!wipeBypass) {
+                            if(!wiped) {
+                                JOptionPane.showMessageDialog(null, "BWC was not wiped, Please double-checked the camera recently ejected.", "ERROR", JOptionPane.WARNING_MESSAGE);
+                            }
+                        }
                     }
                     break;
             }
